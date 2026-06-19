@@ -57,10 +57,40 @@ def parse(epub_path, output):
 @click.argument("project_dir", type=click.Path(exists=True))
 @click.option("--llm-base-url", default="http://localhost:8000/v1", help="OpenAI-compatible LLM API base URL")
 @click.option("--llm-model", default="qwen3-30b", help="Model name for annotation")
-def annotate(project_dir, llm_base_url, llm_model):
+@click.option("--llm-api-key", default="not-needed", help="API key (if required by LLM server)")
+@click.option("--review/--no-review", default=True, help="Run review pass to fix attribution errors")
+def annotate(project_dir, llm_base_url, llm_model, llm_api_key, review):
     """Annotate parsed book with speaker attribution."""
-    click.echo(f"Annotating {project_dir} with {llm_model}...")
-    click.echo("(Not yet implemented)")
+    import json
+    from pathlib import Path
+    from .annotate import annotate_book, review_script, save_script, AnnotationConfig
+
+    project = Path(project_dir)
+    parsed_path = project / "parsed_book.json"
+
+    if not parsed_path.exists():
+        click.echo(f"Error: {parsed_path} not found. Run 'parse' first.", err=True)
+        raise SystemExit(1)
+
+    with open(parsed_path) as f:
+        parsed_book = json.load(f)
+
+    click.echo(f"Annotating '{parsed_book.get('title', '?')}' with {llm_model}...")
+
+    config = AnnotationConfig(
+        llm_base_url=llm_base_url,
+        llm_model=llm_model,
+        llm_api_key=llm_api_key,
+    )
+
+    entries = annotate_book(parsed_book, config)
+
+    if review:
+        click.echo("Running review pass...")
+        entries = review_script(entries, config)
+
+    save_script(entries, project / "annotated_script.json")
+    click.echo(f"Done! {len(entries)} script entries saved.")
 
 
 @cli.command()
