@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.pixi/
+.venv/
+*.env
+
+# IDE
+.vscode/
+.idea/
+
+# Project outputs
+outputs/
+projects/
+*.wav
+*.mp3
+*.m4b
+
+# Models (too large for git)
+models/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# OS
+.DS_Store
+Thumbs.db

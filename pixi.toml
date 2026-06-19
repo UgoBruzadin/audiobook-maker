@@ -1,0 +1,53 @@
+[project]
+name = "audiobook-maker"
+version = "0.1.0"
+description = "Multi-voice audiobook generator from EPUBs with character identification and voice cloning"
+channels = ["conda-forge", "pytorch"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.10.*"
+pip = "*"
+ffmpeg = "*"
+
+[pypi-dependencies]
+# EPUB parsing
+ebooklib = ">=0.18"
+beautifulsoup4 = ">=4.12"
+lxml = "*"
+nltk = ">=3.8"
+
+# TTS engine (XTTS v2)
+TTS = "==0.22.0"
+torch = {version = ">=2.7", find-links = "https://download.pytorch.org/whl/cu126"}
+torchaudio = {version = ">=2.7", find-links = "https://download.pytorch.org/whl/cu126"}
+transformers = "==4.40.2"
+
+# Audio processing
+numpy = ">=2.0,<2.2"
+scipy = ">=1.14"
+soundfile = "*"
+librosa = ">=0.11"
+
+# Speaker diarization & voice extraction
+pyannote-audio = ">=3.3"
+resemblyzer = ">=0.1.4"
+
+# LLM client (for annotation)
+openai = ">=1.0"
+
+# Export
+mutagen = ">=1.47"
+
+# CLI
+click = ">=8.0"
+
+[tasks]
+parse = "python -m audiobook_maker.parse"
+annotate = "python -m audiobook_maker.annotate"
+synthesize = "python -m audiobook_maker.synthesize"
+make = "python -m audiobook_maker"
+
+[feature.cuda]
+platforms = ["linux-64"]
+system-requirements = {cuda = "12"}
