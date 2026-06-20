@@ -186,6 +186,9 @@ def _call_llm(client: OpenAI, config: AnnotationConfig, user_prompt: str) -> lis
             if entries:
                 return entries
 
+        except (json.JSONDecodeError, KeyError, IndexError):
+            # Response was malformed — retry
+            continue
         except Exception as e:
             if attempt == config.max_retries:
                 print(f"  WARNING: LLM call failed after {config.max_retries + 1} attempts: {e}")
@@ -236,30 +239,14 @@ def _validate_entries(entries: list) -> list[dict]:
             continue
         if "speaker" not in entry or "text" not in entry:
             continue
-        # Ensure instruct field exists
-        if "instruct" not in entry:
-            entry["instruct"] = ""
-        # Clean speaker name
-        entry["speaker"] = entry["speaker"].strip().upper()
-        entry["text"] = entry["text"].strip()
-        entry["instruct"] = entry["instruct"].strip()
-        if entry["text"]:
-            valid.append(entry)
+        text = entry["text"].strip()
+        if not text:
+            continue
+        valid.append({
+            "speaker": entry["speaker"].strip().upper(),
+            "text": text,
+            "instruct": entry.get("instruct", "").strip(),
+        })
     return valid
 
 
-def save_script(entries: list[ScriptEntry], output_path: str | Path):
-    """Save annotated script to JSON."""
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    data = [e.to_dict() for e in entries]
-    with open(output_path, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    print(f"Script saved: {output_path} ({len(entries)} entries)")
-
-
-def load_script(path: str | Path) -> list[ScriptEntry]:
-    """Load annotated script from JSON."""
-    with open(path) as f:
-        data = json.load(f)
-    return [ScriptEntry(**entry) for entry in data]

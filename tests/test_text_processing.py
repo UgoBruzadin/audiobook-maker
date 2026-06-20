@@ -1,10 +1,5 @@
 """Tests for text_processing module: cleaning, splitting, chunking."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from audiobook_maker.parse.text_processing import (
     clean_for_tts,
     split_sentences,

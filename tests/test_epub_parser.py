@@ -1,11 +1,6 @@
 """Tests for epub_parser module: HTML processing, filtering, paragraph extraction."""
 
-import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-from dataclasses import dataclass
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from unittest.mock import MagicMock
 
 from bs4 import BeautifulSoup
 from audiobook_maker.parse.epub_parser import (

@@ -1,18 +1,16 @@
 """Tests for annotation module: chunking, JSON parsing, review logic."""
 
-import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 import json
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from unittest.mock import MagicMock, patch
 
 from audiobook_maker.annotate.annotator import (
     _chunk_paragraphs,
     _position_marker,
     _parse_json_response,
     _validate_entries,
+    annotate_book,
     ScriptEntry,
+    AnnotationConfig,
 )
 from audiobook_maker.annotate.reviewer import (
     _merge_short_narrators,
@@ -266,3 +264,117 @@ class TestBuildReviewPrompt:
         prompt = build_review_prompt([], roster=["ELENA", "MARCUS"])
         assert "ELENA" in prompt
         assert "MARCUS" in prompt
+
+
+class TestAnnotateBookIntegration:
+    """Integration test with mocked LLM client."""
+
+    def _mock_llm_response(self, text_chunk):
+        """Simulate LLM returning a reasonable annotation."""
+        return json.dumps([
+            {"speaker": "NARRATOR", "text": "The door opened slowly.", "instruct": "Tense, measured narration"},
+            {"speaker": "ELENA", "text": "Who's there?", "instruct": "Sharp whisper, alert"},
+        ])
+
+    @patch("audiobook_maker.annotate.annotator.OpenAI")
+    def test_annotate_book_with_mocked_llm(self, mock_openai_cls):
+        # Set up mock
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps([
+            {"speaker": "NARRATOR", "text": "The door opened slowly.", "instruct": "Tense narration"},
+            {"speaker": "ELENA", "text": "Who's there?", "instruct": "Sharp whisper"},
+        ])
+        mock_client.chat.completions.create.return_value = mock_response
+
+        # Input
+        parsed_book = {
+            "title": "Test Book",
+            "author": "Test Author",
+            "chapters": [{
+                "index": 0,
+                "title": "Chapter One",
+                "paragraphs": [
+                    {"text": "The door opened slowly."},
+                    {"text": '"Who\'s there?" Elena whispered.'},
+                ],
+            }],
+        }
+
+        config = AnnotationConfig(llm_base_url="http://fake:8000/v1")
+        entries = annotate_book(parsed_book, config)
+
+        # Verify
+        assert len(entries) == 2
+        assert entries[0].speaker == "NARRATOR"
+        assert entries[1].speaker == "ELENA"
+        assert entries[0].chapter_index == 0
+
+        # Verify LLM was called
+        mock_client.chat.completions.create.assert_called_once()
+
+    @patch("audiobook_maker.annotate.annotator.OpenAI")
+    def test_tracks_characters_across_chapters(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+
+        # Chapter 1: introduces ELENA
+        ch1_response = MagicMock()
+        ch1_response.choices = [MagicMock()]
+        ch1_response.choices[0].message.content = json.dumps([
+            {"speaker": "ELENA", "text": "Hello.", "instruct": "warm"},
+        ])
+
+        # Chapter 2: introduces MARCUS
+        ch2_response = MagicMock()
+        ch2_response.choices = [MagicMock()]
+        ch2_response.choices[0].message.content = json.dumps([
+            {"speaker": "MARCUS", "text": "Goodbye.", "instruct": "cold"},
+        ])
+
+        mock_client.chat.completions.create.side_effect = [ch1_response, ch2_response]
+
+        parsed_book = {
+            "title": "Test",
+            "author": "Author",
+            "chapters": [
+                {"index": 0, "title": "Ch1", "paragraphs": [{"text": "Elena spoke."}]},
+                {"index": 1, "title": "Ch2", "paragraphs": [{"text": "Marcus replied."}]},
+            ],
+        }
+
+        config = AnnotationConfig(llm_base_url="http://fake:8000/v1")
+        entries = annotate_book(parsed_book, config)
+
+        assert len(entries) == 2
+        assert entries[0].speaker == "ELENA"
+        assert entries[1].speaker == "MARCUS"
+        assert entries[1].chapter_index == 1
+
+        # Second LLM call should have received the roster with ELENA
+        second_call_args = mock_client.chat.completions.create.call_args_list[1]
+        user_msg = second_call_args[1]["messages"][1]["content"]
+        assert "ELENA" in user_msg  # roster passed as context
+
+    @patch("audiobook_maker.annotate.annotator.OpenAI")
+    def test_handles_llm_failure_gracefully(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = ConnectionError("Server down")
+
+        parsed_book = {
+            "title": "Test",
+            "author": "Author",
+            "chapters": [
+                {"index": 0, "title": "Ch1", "paragraphs": [{"text": "Some text here."}]},
+            ],
+        }
+
+        config = AnnotationConfig(llm_base_url="http://fake:8000/v1", max_retries=1)
+        entries = annotate_book(parsed_book, config)
+
+        # Should return empty gracefully, not crash
+        assert entries == []
