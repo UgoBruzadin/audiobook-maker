@@ -115,10 +115,42 @@ def export(project_dir, fmt, output):
 @cli.command()
 @click.argument("audiobook_path", type=click.Path(exists=True))
 @click.option("--output", "-o", default="./voices", help="Output directory for extracted voice clips")
-def extract_voices(audiobook_path, output):
+@click.option("--num-speakers", type=int, default=None, help="Exact number of speakers (if known)")
+@click.option("--min-speakers", type=int, default=None, help="Minimum expected speakers")
+@click.option("--max-speakers", type=int, default=None, help="Maximum expected speakers")
+@click.option("--hf-token", default=None, help="HuggingFace token for pyannote models")
+@click.option("--min-clip", type=float, default=5.0, help="Minimum clip duration (seconds)")
+@click.option("--target-clip", type=float, default=20.0, help="Target clip duration for cloning")
+def extract_voices(audiobook_path, output, num_speakers, min_speakers, max_speakers, hf_token, min_clip, target_clip):
     """Extract character voices from an existing audiobook via diarization."""
+    from pathlib import Path
+    from .voices.extract import diarize, compute_speaker_profiles, extract_clips
+
     click.echo(f"Extracting voices from {audiobook_path}...")
-    click.echo("(Not yet implemented)")
+
+    # Step 1: Diarize
+    result = diarize(
+        audiobook_path,
+        num_speakers=num_speakers,
+        min_speakers=min_speakers,
+        max_speakers=max_speakers,
+        hf_token=hf_token,
+    )
+
+    # Step 2: Compute speaker profiles (embeddings + best clips)
+    click.echo("Computing speaker profiles...")
+    clustering = compute_speaker_profiles(result)
+
+    # Step 3: Extract and save clips
+    click.echo("Extracting reference clips...")
+    voices = extract_clips(
+        clustering,
+        output_dir=output,
+        target_duration=target_clip,
+        min_clip_duration=min_clip,
+    )
+
+    click.echo(f"\nDone! Extracted {len(voices)} clips for {len(clustering.profiles)} speakers → {output}")
 
 
 if __name__ == "__main__":
