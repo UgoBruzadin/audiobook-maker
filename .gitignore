@@ -35,3 +35,4 @@ Thumbs.db
 *.epub
 test_project/
 src/audiobook_maker/epubs/
+logs/
