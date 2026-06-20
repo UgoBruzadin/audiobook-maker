@@ -35,9 +35,12 @@ class ScriptEntry:
 
 @dataclass
 class AnnotationConfig:
+    # Provider: "openai" (OpenAI-compatible API) or "bedrock" (Anthropic Bedrock)
+    provider: str = "openai"
     llm_base_url: str = "http://localhost:8000/v1"
     llm_model: str = "qwen3-30b"
     llm_api_key: str = "not-needed"
+    aws_region: str = "us-east-1"
     max_chunk_chars: int = 3000
     temperature: float = 0.4
     top_p: float = 0.8
@@ -62,7 +65,7 @@ def annotate_book(
     if config is None:
         config = AnnotationConfig()
 
-    client = OpenAI(base_url=config.llm_base_url, api_key=config.llm_api_key)
+    client = _create_client(config)
 
     all_entries: list[ScriptEntry] = []
     characters_seen: set[str] = set()
@@ -165,29 +168,29 @@ def _position_marker(ch_idx: int, total_ch: int, chunk_idx: int, total_chunks: i
     return " ".join(parts)
 
 
-def _call_llm(client: OpenAI, config: AnnotationConfig, user_prompt: str) -> list[dict]:
+def _create_client(config: AnnotationConfig):
+    """Create the appropriate LLM client based on provider."""
+    if config.provider == "bedrock":
+        import anthropic
+        return anthropic.AnthropicBedrock(aws_region=config.aws_region)
+    elif config.provider == "anthropic":
+        import anthropic
+        return anthropic.Anthropic()
+    else:
+        return OpenAI(base_url=config.llm_base_url, api_key=config.llm_api_key)
+
+
+def _call_llm(client, config: AnnotationConfig, user_prompt: str) -> list[dict]:
     """Call LLM and parse JSON response, with retries."""
     for attempt in range(config.max_retries + 1):
         try:
-            response = client.chat.completions.create(
-                model=config.llm_model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=config.temperature,
-                top_p=config.top_p,
-                max_tokens=config.max_tokens,
-            )
-
-            content = response.choices[0].message.content.strip()
+            content = _call_provider(client, config, user_prompt)
             entries = _parse_json_response(content)
 
             if entries:
                 return entries
 
         except (json.JSONDecodeError, KeyError, IndexError):
-            # Response was malformed — retry
             continue
         except Exception as e:
             if attempt == config.max_retries:
@@ -196,6 +199,32 @@ def _call_llm(client: OpenAI, config: AnnotationConfig, user_prompt: str) -> lis
             continue
 
     return []
+
+
+def _call_provider(client, config: AnnotationConfig, user_prompt: str) -> str:
+    """Dispatch to the right API based on provider. Returns response text."""
+    if config.provider in ("bedrock", "anthropic"):
+        response = client.messages.create(
+            model=config.llm_model,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+            top_p=config.top_p,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text.strip()
+    else:
+        response = client.chat.completions.create(
+            model=config.llm_model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=config.temperature,
+            top_p=config.top_p,
+            max_tokens=config.max_tokens,
+        )
+        return response.choices[0].message.content.strip()
 
 
 def _parse_json_response(content: str) -> list[dict]:

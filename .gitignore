@@ -32,3 +32,6 @@ models/
 # OS
 .DS_Store
 Thumbs.db
+*.epub
+test_project/
+src/audiobook_maker/epubs/
