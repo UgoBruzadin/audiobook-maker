@@ -95,11 +95,45 @@ def annotate(project_dir, llm_base_url, llm_model, llm_api_key, review):
 
 @cli.command()
 @click.argument("project_dir", type=click.Path(exists=True))
-@click.option("--voice-map", type=click.Path(exists=True), help="Voice configuration JSON")
-def synthesize(project_dir, voice_map):
+@click.option("--voice-map", "-v", type=click.Path(exists=True), required=True, help="Voice configuration JSON")
+@click.option("--engine", type=click.Choice(["xtts_v2", "qwen3_tts"]), default="xtts_v2", help="TTS engine")
+@click.option("--language", "-l", default="en", help="Language code")
+@click.option("--speed", type=float, default=1.0, help="Playback speed")
+@click.option("--max-chunk", type=int, default=350, help="Max characters per TTS chunk")
+def synthesize(project_dir, voice_map, engine, language, speed, max_chunk):
     """Synthesize annotated script into audio."""
-    click.echo(f"Synthesizing {project_dir}...")
-    click.echo("(Not yet implemented)")
+    from pathlib import Path
+    from .annotate import load_script
+    from .synthesize import synthesize_script, load_voice_map, SynthesisConfig
+
+    project = Path(project_dir)
+    script_path = project / "annotated_script.json"
+
+    if not script_path.exists():
+        click.echo(f"Error: {script_path} not found. Run 'annotate' first.", err=True)
+        raise SystemExit(1)
+
+    script = load_script(script_path)
+    voices = load_voice_map(voice_map)
+
+    click.echo(f"Synthesizing {len(script)} entries with {engine}...")
+    click.echo(f"  Voices: {', '.join(voices.keys())}")
+
+    config = SynthesisConfig(
+        engine_name=engine,
+        max_chunk_chars=max_chunk,
+        language=language,
+        speed=speed,
+    )
+
+    rendered = synthesize_script(
+        script=script,
+        voice_map=voices,
+        output_dir=project / "audio",
+        config=config,
+    )
+
+    click.echo(f"Done! {len(rendered)} audio clips rendered.")
 
 
 @cli.command()
