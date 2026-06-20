@@ -140,10 +140,95 @@ def synthesize(project_dir, voice_map, engine, language, speed, max_chunk):
 @click.argument("project_dir", type=click.Path(exists=True))
 @click.option("--format", "fmt", type=click.Choice(["m4b", "mp3", "wav"]), default="m4b")
 @click.option("--output", "-o", help="Output file path")
-def export(project_dir, fmt, output):
-    """Export rendered audio as M4B/MP3."""
-    click.echo(f"Exporting {project_dir} as {fmt}...")
-    click.echo("(Not yet implemented)")
+@click.option("--title", default=None, help="Book title (auto-detected from parsed_book.json)")
+@click.option("--author", default=None, help="Author (auto-detected from parsed_book.json)")
+def export(project_dir, fmt, output, title, author):
+    """Assemble chapter audio and export as M4B/MP3."""
+    import json
+    from pathlib import Path
+    from .synthesize.pipeline import RenderedEntry
+    from .assemble import assemble_chapters, export_m4b, export_mp3
+
+    project = Path(project_dir)
+
+    # Load rendered entries manifest
+    audio_dir = project / "audio"
+    if not audio_dir.exists():
+        click.echo("Error: audio/ directory not found. Run 'synthesize' first.", err=True)
+        raise SystemExit(1)
+
+    # Load metadata for title/author
+    parsed_path = project / "parsed_book.json"
+    if parsed_path.exists():
+        with open(parsed_path) as f:
+            meta = json.load(f)
+        title = title or meta.get("title", "Audiobook")
+        author = author or meta.get("author", "Unknown")
+        chapter_titles = {ch["index"]: ch.get("title") for ch in meta.get("chapters", [])}
+    else:
+        title = title or "Audiobook"
+        author = author or "Unknown"
+        chapter_titles = {}
+
+    # Discover rendered WAV files and reconstruct RenderedEntry list
+    import soundfile as sf
+    rendered = []
+    for wav_path in sorted(audio_dir.glob("*.wav")):
+        # Filename format: 00000_SPEAKER.wav
+        parts = wav_path.stem.split("_", 1)
+        if len(parts) != 2:
+            continue
+        idx = int(parts[0])
+        speaker = parts[1]
+        info = sf.info(str(wav_path))
+        rendered.append(RenderedEntry(
+            entry_index=idx,
+            speaker=speaker,
+            audio_path=str(wav_path),
+            duration=info.duration,
+            chapter_index=0,  # will be resolved from script
+        ))
+
+    # Try to load chapter indices from annotated script
+    script_path = project / "annotated_script.json"
+    if script_path.exists():
+        with open(script_path) as f:
+            script_data = json.load(f)
+        # Rebuild with correct chapter indices
+        chapter_map = {i: entry.get("chapter_index", 0) for i, entry in enumerate(script_data)}
+        rendered = [
+            RenderedEntry(
+                entry_index=r.entry_index,
+                speaker=r.speaker,
+                audio_path=r.audio_path,
+                duration=r.duration,
+                chapter_index=chapter_map.get(r.entry_index, 0),
+            )
+            for r in rendered
+        ]
+
+    click.echo(f"Assembling {len(rendered)} entries into chapters...")
+
+    # Assemble chapters
+    chapters = assemble_chapters(
+        rendered,
+        output_dir=project / "chapters",
+        chapter_titles=chapter_titles,
+    )
+
+    # Export
+    if output is None:
+        output = project / f"{title}.{fmt}"
+
+    if fmt == "m4b":
+        result = export_m4b(chapters, output, title=title, author=author)
+    elif fmt == "mp3":
+        result = export_mp3(chapters, output, title=title, author=author)
+    else:
+        click.echo(f"WAV chapters saved in {project / 'chapters'}")
+        return
+
+    click.echo(f"Exported: {result.output_path} ({result.duration / 60:.1f} min)")
 
 
 @cli.command()
